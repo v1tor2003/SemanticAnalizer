@@ -1,23 +1,18 @@
 import * as fsPromises from 'fs/promises'
-import { Scope, Token } from "./scope"
-import { Lexeme } from "./scope"
-
-const KEYWORDS = {
-  openBlock: "BLOCO",
-  closeBlock: "FIM",
-  printToken: "PRINT"
-}
+import { Scope } from "./scope"
+import { KEYWORDS, Kind, Lexeme, Token, tk_id_regex, tk_number_regex, tk_string_literal_regex } from './definitions'
 
 export class Interpreter {
-  private globalScope = new Scope('_GLOBAL_')
-  private currScope = this.globalScope
   private static lineCounter: number = 0
+  private globalScope = new Scope(Interpreter.lineCounter, '_GLOBAL_')
+  private currScope = this.globalScope
+
   constructor(){}
   
   private exec(tokens: string[]): void{
     Interpreter.lineCounter++
     if(tokens.length === 0) return
-                               
+             
     if(tokens[0] === KEYWORDS.openBlock) this.createScope(tokens[1])
     else if(tokens[0] === KEYWORDS.closeBlock) this.exitScope()
     else if(tokens[0] === KEYWORDS.printToken) this.print(tokens[1])
@@ -30,7 +25,7 @@ export class Interpreter {
       return
     }
     
-    this.currScope = new Scope(blockId, this.currScope)
+    this.currScope = new Scope(Interpreter.lineCounter, blockId, this.currScope)
   }
 
   private exitScope(){ 
@@ -49,26 +44,22 @@ export class Interpreter {
   }
 
   private process(tokens: string[]): void {
-    // Assign variables
     if(tokens[0] !== "NUMERO" && tokens[0] !== "CADEIA"){
       const atr: string = tokens.join(' ')
       const operands: string[] = atr.split('=')
       this.processAssign(operands[0].trim(), operands[1].trim())
-    }else{
-      // Define variables
-      this.processDef(tokens)
-    }
+    } else this.processDef(tokens)
   }
 
   private processAssign(left: string, right: string): void{
     let t: Token
-    if(right.startsWith('\"')){
+    if(tk_string_literal_regex.test(right)){
       t = {
         kind: 'tk_cadeia',
         type: 'string',
         value: right.slice(1, -1)
       }
-    }else if(parseFloat(right)){
+    }else if(tk_number_regex.test(right)){
       t = {
         kind: 'tk_numero',
         type: 'number',
@@ -79,19 +70,54 @@ export class Interpreter {
     this.currScope.assign(Interpreter.lineCounter, left, t)
   }
 
+  private parseToken(type: string, token: string) {
+    switch (type) {
+      case "NUMERO":
+        return this.parseNumberToken(token)
+      case "CADEIA":
+        return this.parseStringToken(token)
+      default:
+        console.error(`Erro linha ${Interpreter.lineCounter}, Tipo desconhecido: ${type}`)
+        return
+    }
+  }
+
+  private parseNumberToken(token: string) {
+    if (tk_number_regex.test(token)) return parseFloat(token)
+    return this.lookupAndValidateToken(token, 'tk_numero', 'NUMERO')
+  } 
+
+  private parseStringToken(token: string) {
+    if (tk_string_literal_regex.test(token)) return token.slice(1, -1)
+    return this.lookupAndValidateToken(token, 'tk_cadeia', 'NUMERO')
+  }
+
+  private lookupAndValidateToken(token: string, expectedKind: Kind, typeDescription: string) {
+    if (!tk_id_regex.test(token)) {
+      console.error(`Erro linha ${Interpreter.lineCounter}, Erro de tipos incompativeis para constante '${token}'.`)
+      return
+    }
+    
+    const foundId = this.currScope.lookup(token)
+    if (!foundId) {
+        console.error(`Erro linha ${Interpreter.lineCounter}, Variavel '${token}' nao foi definida.`);
+        return;
+    }
+    
+    if (foundId.kind !== expectedKind) {
+        console.error(`Erro linha ${Interpreter.lineCounter}, Erro de tipos incompativeis para variavel '${token}'. Esperava-se um(a) ${typeDescription}.`);
+        return;
+    }
+
+    return foundId.value;
+  }
+
   private processDef(tokens: string[]): void{
     const type = tokens.shift()
     if (tokens.length === 0) return
     if (tokens[1] === '=') {
-        let v: Lexeme | undefined
-
-        if (type === "NUMERO")
-            v = parseFloat(tokens[2]) || this.currScope.lookup(tokens[2])?.value
-        else
-            v = tokens[2].startsWith('\"') ? tokens[2].slice(1, -1) : this.currScope.lookup(tokens[2])?.value
-
-        if (!v) console.log(`Variável '${tokens[2]} não existe.'`)
-
+        let v: Lexeme | undefined = this.parseToken(type as string, tokens[2])
+        if(v === undefined) return
         this.currScope.define(
           Interpreter.lineCounter,
           tokens[0], 
@@ -134,25 +160,46 @@ export class Interpreter {
     line = line.trim()
     
     if (line.startsWith('NUMERO') || line.startsWith('CADEIA')) {
-        const type = line.split(' ')[0]
-        const rest = line.substring(type.length).trim()
-        const parts = rest.split(/[, ]+/).map(part => part.trim())
-        
-        const finalArray = [type]
-        
-        for (let i = 0; i < parts.length; i++) {
-            if (parts[i].includes('=')) {
-                const [key, value] = parts[i].split('=').map(part => part.trim())
-                finalArray.push(key, '=', value)
-            } else finalArray.push(parts[i])
-        }
+      const type = line.split(' ')[0]
+      const rest = line.substring(type.length).trim()
+      const parts = rest.split(/[, ]+/).map(part => part.trim())
 
-        return finalArray.filter(e => e !== '')
+      const finalArray = [type]
+        
+      let inQuotes = false;
+      let quotedString = '';
+
+      for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+            
+          if (part.includes('=')) {
+              const [key, value] = part.split('=').map(p => p.trim())
+                
+              if (value.startsWith('"') && value.endsWith('"')) finalArray.push(key, '=', value)
+              else if (value.startsWith('"')) {
+                inQuotes = true
+                quotedString = value
+                finalArray.push(key, '=')
+              } else finalArray.push(key, '=', value)
+                
+          } else if (inQuotes) {
+              quotedString += ' ' + part
+                
+              if (part.endsWith('"')) {
+                finalArray.push(quotedString)
+                inQuotes = false
+                quotedString = ''
+              }
+          } else finalArray.push(part)
+      }
+        
+
+      return finalArray.filter(e => e !== '')
     } else if(Object.values(KEYWORDS).includes(line.substring(0, line.indexOf(' ')))) 
       return line.split(' ').map(part => part.trim())
     else {
-        const parts = line.split('=').map(part => part.trim())
-        if (parts.length === 2) return [parts[0], '=', parts[1]]
+      const parts = line.split('=').map(part => part.trim())
+      if (parts.length === 2) return [parts[0], '=', parts[1]]
     }
     
     return []

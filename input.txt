@@ -1,1 +1,7 @@
-BLOCO main
+BLOCO _main_
+  NUMERO y = 21312
+  CADEIA x = y
+  
+  
+
+FIM _main_

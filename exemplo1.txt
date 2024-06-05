@@ -32,7 +32,7 @@ BLOCO _principal_
 			PRINT c
 			a=40
 			PRINT a
-			print c
+			PRINT c
 		FIM _n3_ 
 	FIM _n2_ 
 	PRINT c 

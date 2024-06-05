@@ -1,26 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Scope = void 0;
+const definitions_1 = require("./definitions");
 class Scope {
     scopeName;
     parentScope;
     symbols = {};
-    static tk_id_regex = /^[a-z][a-z0-9_]*$/;
-    static tk_block_regex = /^_[a-zA-Z0-9]+_$/;
-    constructor(scopeName, parentScope = null) {
+    constructor(lineCounter, scopeName, parentScope = null) {
         this.scopeName = scopeName;
         this.parentScope = parentScope;
-        try {
-            if (!Scope.tk_block_regex.test(scopeName))
-                throw new Error();
-            this.symbols[scopeName] = {
-                kind: "tk_bloco",
-                value: scopeName
-            };
+        if (!definitions_1.tk_block_regex.test(scopeName)) {
+            console.log(`Erro linha ${lineCounter}, Nome de escopo mal formado '${scopeName}'`);
+            return;
         }
-        catch (error) {
-            console.log(`Nome de escopo mal formado '${scopeName}'`);
-        }
+        this.symbols[scopeName] = {
+            kind: "tk_bloco",
+            value: scopeName
+        };
     }
     define(lineCounter, id, token) {
         const error = `Erro linha ${lineCounter}, `;
@@ -28,7 +24,7 @@ class Scope {
             console.log(error + `Variavel '${id}' ja existe.`);
             return;
         }
-        if (!Scope.tk_id_regex.test(id)) {
+        if (!definitions_1.tk_id_regex.test(id)) {
             console.log(error + `Nome de variavel '${id}' mal formado.`);
             return;
         }
@@ -37,27 +33,26 @@ class Scope {
     assign(lineCounter, left, right) {
         const error = `Erro linha ${lineCounter}, `;
         if (!this.lookup(left)) {
-            console.log(error + `Variavel '${left}' nao existe.`);
+            console.log(error + `Variavel '${left}' nao foi definida.`);
             return;
         }
         const l = this.lookup(left);
         if (right.kind !== 'tk_id') {
             if (this.lookup(left)?.type !== right.type) {
-                console.log(error + `Erro tipo de dado nao compativeis ${l?.type}: [${left}] e ${right.type} [${right.value}].`);
+                console.log(error + `Erro tipos de dados imcompativeis para variavel '${left}'. Esperava-se um(a) ${l?.type === 'number' ? 'NUMERO' : 'CADEIA'}.`);
                 return;
             }
-            //may be lookyp
             if (l)
                 l.value = right.value;
             return;
         }
         if (!this.lookup(right.value)) {
-            console.log(error + `Variavel '${right.value}' nao existe.`);
+            console.log(error + `Variavel '${right.value}' nao foi definida.`);
             return;
         }
         if (l?.type !== this.lookup(right.value)?.type) {
             console.log(error +
-                `Erro tipo de dado nao compativeis ${l?.type}: [${l?.value}] e ${this.lookup(right.value)?.type}: [${this.lookup(right.value)?.value}].`);
+                `Erro tipos de dados imcompativeis para variavel '${l?.value}'. Esperava-se um(a) ${this.lookup(right.value)?.type === 'number' ? 'NUMERO' : 'CADEIA'}.`);
             return;
         }
         if (l)

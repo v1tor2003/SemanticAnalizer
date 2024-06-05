@@ -3,25 +3,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Interpreter = void 0;
 const fsPromises = require("fs/promises");
 const scope_1 = require("./scope");
-const KEYWORDS = {
-    openBlock: "BLOCO",
-    closeBlock: "FIM",
-    printToken: "PRINT"
-};
+const definitions_1 = require("./definitions");
 class Interpreter {
-    globalScope = new scope_1.Scope('_GLOBAL_');
-    currScope = this.globalScope;
     static lineCounter = 0;
+    globalScope = new scope_1.Scope(Interpreter.lineCounter, '_GLOBAL_');
+    currScope = this.globalScope;
     constructor() { }
     exec(tokens) {
         Interpreter.lineCounter++;
         if (tokens.length === 0)
             return;
-        if (tokens[0] === KEYWORDS.openBlock)
+        if (tokens[0] === definitions_1.KEYWORDS.openBlock)
             this.createScope(tokens[1]);
-        else if (tokens[0] === KEYWORDS.closeBlock)
+        else if (tokens[0] === definitions_1.KEYWORDS.closeBlock)
             this.exitScope();
-        else if (tokens[0] === KEYWORDS.printToken)
+        else if (tokens[0] === definitions_1.KEYWORDS.printToken)
             this.print(tokens[1]);
         else
             this.process(tokens);
@@ -31,7 +27,7 @@ class Interpreter {
             console.log(`Erro linha ${Interpreter.lineCounter}, Escopo '${blockId}' ja foi definido.`);
             return;
         }
-        this.currScope = new scope_1.Scope(blockId, this.currScope);
+        this.currScope = new scope_1.Scope(Interpreter.lineCounter, blockId, this.currScope);
     }
     exitScope() {
         if (this.currScope !== this.globalScope)
@@ -49,27 +45,24 @@ class Interpreter {
             console.log(token.value);
     }
     process(tokens) {
-        // Assign variables
         if (tokens[0] !== "NUMERO" && tokens[0] !== "CADEIA") {
             const atr = tokens.join(' ');
             const operands = atr.split('=');
             this.processAssign(operands[0].trim(), operands[1].trim());
         }
-        else {
-            // Define variables
+        else
             this.processDef(tokens);
-        }
     }
     processAssign(left, right) {
         let t;
-        if (right.startsWith('\"')) {
+        if (definitions_1.tk_string_literal_regex.test(right)) {
             t = {
                 kind: 'tk_cadeia',
                 type: 'string',
                 value: right.slice(1, -1)
             };
         }
-        else if (parseFloat(right)) {
+        else if (definitions_1.tk_number_regex.test(right)) {
             t = {
                 kind: 'tk_numero',
                 type: 'number',
@@ -80,18 +73,51 @@ class Interpreter {
             t = { kind: 'tk_id', value: right };
         this.currScope.assign(Interpreter.lineCounter, left, t);
     }
+    parseToken(type, token) {
+        switch (type) {
+            case "NUMERO":
+                return this.parseNumberToken(token);
+            case "CADEIA":
+                return this.parseStringToken(token);
+            default:
+                console.error(`Erro linha ${Interpreter.lineCounter}, Tipo desconhecido: ${type}`);
+                return;
+        }
+    }
+    parseNumberToken(token) {
+        if (definitions_1.tk_number_regex.test(token))
+            return parseFloat(token);
+        return this.lookupAndValidateToken(token, 'tk_numero', 'NUMERO');
+    }
+    parseStringToken(token) {
+        if (definitions_1.tk_string_literal_regex.test(token))
+            return token.slice(1, -1);
+        return this.lookupAndValidateToken(token, 'tk_cadeia', 'NUMERO');
+    }
+    lookupAndValidateToken(token, expectedKind, typeDescription) {
+        if (!definitions_1.tk_id_regex.test(token)) {
+            console.error(`Erro linha ${Interpreter.lineCounter}, Erro de tipos incompativeis para constante '${token}'.`);
+            return;
+        }
+        const foundId = this.currScope.lookup(token);
+        if (!foundId) {
+            console.error(`Erro linha ${Interpreter.lineCounter}, Variavel '${token}' nao foi definida.`);
+            return;
+        }
+        if (foundId.kind !== expectedKind) {
+            console.error(`Erro linha ${Interpreter.lineCounter}, Erro de tipos incompativeis para variavel '${token}'. Esperava-se um(a) ${typeDescription}.`);
+            return;
+        }
+        return foundId.value;
+    }
     processDef(tokens) {
         const type = tokens.shift();
         if (tokens.length === 0)
             return;
         if (tokens[1] === '=') {
-            let v;
-            if (type === "NUMERO")
-                v = parseFloat(tokens[2]) || this.currScope.lookup(tokens[2])?.value;
-            else
-                v = tokens[2].startsWith('\"') ? tokens[2].slice(1, -1) : this.currScope.lookup(tokens[2])?.value;
-            if (!v)
-                console.log(`Variável '${tokens[2]} não existe.'`);
+            let v = this.parseToken(type, tokens[2]);
+            if (v === undefined)
+                return;
             this.currScope.define(Interpreter.lineCounter, tokens[0], {
                 kind: type === "NUMERO" ? "tk_numero" : "tk_cadeia",
                 type: type === "NUMERO" ? "number" : "string",
@@ -125,17 +151,36 @@ class Interpreter {
             const rest = line.substring(type.length).trim();
             const parts = rest.split(/[, ]+/).map(part => part.trim());
             const finalArray = [type];
+            let inQuotes = false;
+            let quotedString = '';
             for (let i = 0; i < parts.length; i++) {
-                if (parts[i].includes('=')) {
-                    const [key, value] = parts[i].split('=').map(part => part.trim());
-                    finalArray.push(key, '=', value);
+                const part = parts[i];
+                if (part.includes('=')) {
+                    const [key, value] = part.split('=').map(p => p.trim());
+                    if (value.startsWith('"') && value.endsWith('"'))
+                        finalArray.push(key, '=', value);
+                    else if (value.startsWith('"')) {
+                        inQuotes = true;
+                        quotedString = value;
+                        finalArray.push(key, '=');
+                    }
+                    else
+                        finalArray.push(key, '=', value);
+                }
+                else if (inQuotes) {
+                    quotedString += ' ' + part;
+                    if (part.endsWith('"')) {
+                        finalArray.push(quotedString);
+                        inQuotes = false;
+                        quotedString = '';
+                    }
                 }
                 else
-                    finalArray.push(parts[i]);
+                    finalArray.push(part);
             }
             return finalArray.filter(e => e !== '');
         }
-        else if (Object.values(KEYWORDS).includes(line.substring(0, line.indexOf(' '))))
+        else if (Object.values(definitions_1.KEYWORDS).includes(line.substring(0, line.indexOf(' '))))
             return line.split(' ').map(part => part.trim());
         else {
             const parts = line.split('=').map(part => part.trim());
