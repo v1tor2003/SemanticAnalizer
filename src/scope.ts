@@ -6,7 +6,7 @@ import {
 from "./definitions"
 // Definicao da classe Scope
 export class Scope {
-  public symbols: SymbolTable = {} // tabela de simbolos do escopo
+  private symbols: SymbolTable = {} // tabela de simbolos do escopo
   /**
    * @param {number} lineCounter linha atual de execucao
    * @param {string} scopeName nome do escopo
